@@ -1,14 +1,16 @@
 from __future__ import with_statement
 
-from flask import Flask, request, abort, send_file
+from flask import Flask, request, abort, Response
 from redislite import Redis
 from contextlib import closing
-from appy.pod.renderer import Renderer
 import requests
 import logging
 import os
 import tempfile
 import sys
+import json
+
+from genshi.core import Markup
 
 app = Flask("Odt2Pdf")
 redis = Redis("odt2pdf.db")
@@ -19,8 +21,11 @@ app.logger.addHandler(logging.StreamHandler())
 warn = app.logger.warning
 
 APP_KEY = os.environ.get("APP_KEY")
+FUSION_URL = os.environ.get("FUSION_URL", 'http://localhost:8765/form')
 
-UNOPYTHON = os.environ.get("UNOPYTHON", "")
+def format_with_linebreaks(inp):
+    return json.dumps(inp)
+    # .replace("\n", "\000A")
 
 if not APP_KEY:
     print("You need to set the APP_KEY environment variable!")
@@ -62,8 +67,7 @@ def _fetch_template(url=False, headers=None, **kwargs):
     print(tmp_name)
     return tmp_name
 
-# accepting mandrill inbound format:
-# https://mandrill.zendesk.com/hc/en-us/articles/205583207-What-is-the-format-of-inbound-email-webhooks-
+
 
 @app.route('/render/template/{}'.format(APP_KEY), methods=["POST"])
 def render_template():
@@ -77,28 +81,29 @@ def render_template():
     except KeyError:
         abort(400, "No context, no document!")
 
-    suffix = payload.get("format", "pdf")
-
-    template = _fetch_template(**payload['template'])
-
-    fd, target = tempfile.mkstemp(suffix=".{}".format(suffix))
-    os.close(fd)
-    os.remove(target)
 
     try:
-        # FIXME: we are not cleaning up our target documents, are we?
-        r = Renderer(template, context, target,
-                     pythonWithUnoPath=UNOPYTHON,
-                     forceOoCall=True,
-                     overwriteExisting=True)
-        r.run()
+        reader = open(_fetch_template(**payload['template']), 'rb')
 
-        return send_file(target, as_attachment=True)
+        # finally POST our request on the endpoint
+        req = requests.post(FUSION_URL,
+                          data={
+                                "targetformat": payload.get("format", "ODT"),
+                                "datadict": format_with_linebreaks(payload["context"]),
+                                "image_mapping": "{}" },
+                          files={'tmpl_file': reader},
+                          stream=True)
+
+        # don't forget to close our orginal odt file
     finally:
-        try:
-            os.remove(target)
-        except:
-            pass
+        reader.close()
+
+    # see if it is a success or a failure
+    # ATM the server only returns 400 errors... this may change
+    if req.status_code > 400:
+        abort(req.status_code, description="Rendering failed: {}".format(req.content))
+
+    return Response(req.content, mimetype=req.headers['content-type'], headers={"Content-Disposition": "attachment"})
 
 
 
