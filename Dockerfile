@@ -3,7 +3,8 @@ MAINTAINER Benjamin Kampmann <ben@hackership.org>
 
 ENV DEBIAN_FRONTEND noninteractive
 RUN apt-get update && \
-    apt-get install -q -y python python-pip python-virtualenv python-uno \
+    apt-get install -q -y python python-pip python-virtualenv python-dev\
+    python3-uno \
     gunicorn supervisor \
     libreoffice libreoffice-writer ure libreoffice-java-common libreoffice-core \
     libreoffice-common openjdk-7-jre \
@@ -21,6 +22,8 @@ ADD requirements.txt /app/requirements.txt
 ADD app.py /app/app.py
 
 RUN pip install -r /app/requirements.txt
+
+ENV UNOPYTHON /usr/bin/python3
 
 ADD supervisor.flask.conf /etc/supervisor/conf.d/flask.conf
 ADD supervisor.libreoffice.conf /etc/supervisor/conf.d/libreoffice.conf
