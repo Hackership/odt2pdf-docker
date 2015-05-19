@@ -1,16 +1,14 @@
 from __future__ import with_statement
 
-from flask import Flask, request, abort, Response
+from flask import Flask, request, abort, send_file
 from redislite import Redis
 from contextlib import closing
+from appy.pod.renderer import Renderer
 import requests
 import logging
 import os
 import tempfile
 import sys
-import json
-
-from genshi.core import Markup
 
 app = Flask("Odt2Pdf")
 redis = Redis("odt2pdf.db")
@@ -21,11 +19,8 @@ app.logger.addHandler(logging.StreamHandler())
 warn = app.logger.warning
 
 APP_KEY = os.environ.get("APP_KEY")
-FUSION_URL = os.environ.get("FUSION_URL", 'http://localhost:8765/form')
 
-def format_with_linebreaks(inp):
-    return json.dumps(inp)
-    # .replace("\n", "\000A")
+UNOPYTHON = os.environ.get("UNOPYTHON", "")
 
 if not APP_KEY:
     print("You need to set the APP_KEY environment variable!")
@@ -64,10 +59,28 @@ def _fetch_template(url=False, headers=None, **kwargs):
                     pass
             tmp_name = filename
 
-    print(tmp_name)
     return tmp_name
 
 
+@app.route("/")
+def hello():
+    return """<html><head>
+<title>ODT 2 PDF Microservice</title>
+<style>
+body {
+  padding: 25vh 20vw;
+  font-family: Helvetica Neue, Helvetica, sans-serif;
+}
+</style>
+</head>
+<body>
+<h1>Congrats, it's up!</h1>
+<p>This is the <a href="https://github.com/hackership/odt2pdf/">odt2pdf</a> Microservice (based on docker), allowing you to easily render ODT-Files with <a href="http://www.appyframework.org/pod.html" target="_blank">POD-Template</a> information into fully fledged PDFs.</p>
+<p>This is a private instance and can only accessed with the knowledge of the <pre>API_KEY</pre>, but if you want to create your own its rather easy. Just follow the steps described <a href="https://github.com/hackership/odt2pdf/#deploy">here</a>.
+
+</body>
+</html>
+"""
 
 @app.route('/render/template/{}'.format(APP_KEY), methods=["POST"])
 def render_template():
@@ -81,29 +94,28 @@ def render_template():
     except KeyError:
         abort(400, "No context, no document!")
 
+    suffix = payload.get("format", "pdf")
+
+    template = _fetch_template(**payload['template'])
+
+    fd, target = tempfile.mkstemp(suffix=".{}".format(suffix))
+    os.close(fd)
+    os.remove(target)
 
     try:
-        reader = open(_fetch_template(**payload['template']), 'rb')
+        # FIXME: we are not cleaning up our target documents, are we?
+        r = Renderer(template, context, target,
+                     pythonWithUnoPath=UNOPYTHON,
+                     forceOoCall=True,
+                     overwriteExisting=True)
+        r.run()
 
-        # finally POST our request on the endpoint
-        req = requests.post(FUSION_URL,
-                          data={
-                                "targetformat": payload.get("format", "ODT"),
-                                "datadict": format_with_linebreaks(payload["context"]),
-                                "image_mapping": "{}" },
-                          files={'tmpl_file': reader},
-                          stream=True)
-
-        # don't forget to close our orginal odt file
+        return send_file(target, as_attachment=True)
     finally:
-        reader.close()
-
-    # see if it is a success or a failure
-    # ATM the server only returns 400 errors... this may change
-    if req.status_code > 400:
-        abort(req.status_code, description="Rendering failed: {}".format(req.content))
-
-    return Response(req.content, mimetype=req.headers['content-type'], headers={"Content-Disposition": "attachment"})
+        try:
+            os.remove(target)
+        except:
+            pass
 
 
 
