@@ -18,7 +18,7 @@ Microservice to render POD-Templated ODT-Files into PDFs given the contextual da
  - includes all necessary python requirements
  - includes caching backend based on literedis
  - includes supervisord for both libre-office service and flask app
- - exposes port 5000 for your convinence
+ - exposes port 5000 for your convenience
 
 ## API
 
