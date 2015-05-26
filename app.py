@@ -39,7 +39,7 @@ def _fetch_template(url=False, headers=None, **kwargs):
         if r.status_code not in [204, 304]:
             # if we received a no-content or not-modified, we assume we are still up to date
             if r.status_code != 200:
-                abort(400, "Received a non 200 response when downloading template: {}".format(r.status))
+                abort(400, "Received a non 200 response when downloading template: {}".format(r.status_code))
 
 
             # we have a new one, download it
